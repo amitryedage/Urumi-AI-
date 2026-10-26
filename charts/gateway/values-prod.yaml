@@ -1,0 +1,40 @@
+# k3s VPS. Set the real domain via --set or a private values file.
+publicUrl: https://app.example.com
+ingress:
+  className: traefik
+  host: app.example.com
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+  tls:
+    enabled: true
+    secretName: gateway-tls
+gateway:
+  image:
+    repository: ghcr.io/CHANGE-ME/urumi-gateway
+    tag: "0.1.0"
+  cookieSecure: true          # HTTPS only
+  replicas: 2
+  mcpStateless: true          # no sticky sessions needed across replicas
+  resources:
+    requests: { cpu: 200m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+dashboard:
+  image:
+    repository: ghcr.io/CHANGE-ME/urumi-dashboard
+    tag: "0.1.0"
+  replicas: 2
+toolbox:
+  image:
+    repository: ghcr.io/CHANGE-ME/urumi-toolbox-mcp
+    tag: "0.1.0"
+everything:
+  image:
+    repository: ghcr.io/CHANGE-ME/urumi-everything-mcp
+    tag: "0.1.0"
+postgres:
+  persistence:
+    storageClass: local-path
+    size: 5Gi
+networkPolicy:
+  ingressControllerNamespace: kube-system

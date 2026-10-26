@@ -1,0 +1,12 @@
+{{ include "gw.simpleWorkload" (dict "root" . "component" "dashboard" "values" .Values.dashboard "port" 8080 "replicas" .Values.dashboard.replicas "uid" 101) }}
+{{- if .Values.toolbox.enabled }}
+---
+{{ include "gw.simpleWorkload" (dict "root" . "component" "toolbox" "values" .Values.toolbox "port" 8080 "upstream" true "env" (list
+  (dict "name" "PORT" "value" "8080")
+  (dict "name" "TOOLBOX_API_KEY" "valueFrom" (dict "secretKeyRef" (dict "name" .Values.existingSecret "key" "toolbox-api-key"))))) }}
+{{- end }}
+{{- if .Values.everything.enabled }}
+---
+{{ include "gw.simpleWorkload" (dict "root" . "component" "everything" "values" .Values.everything "port" 3001 "upstream" true "tcpProbe" true "env" (list
+  (dict "name" "PORT" "value" "3001"))) }}
+{{- end }}

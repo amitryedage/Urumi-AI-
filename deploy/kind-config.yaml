@@ -1,0 +1,14 @@
+# Single-node kind cluster. Host ports 80/443 map to Traefik's NodePorts, so
+# http://store.localhost and http://app.localhost reach the cluster ingress directly.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: urumi
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 30443
+        hostPort: 443
+        protocol: TCP

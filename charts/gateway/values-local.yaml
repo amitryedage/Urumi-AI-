@@ -1,0 +1,23 @@
+publicUrl: http://app.localhost
+ingress:
+  className: traefik
+  host: app.localhost
+networkPolicy:
+  ingressControllerNamespace: traefik
+gateway:
+  image:
+    tag: local-20261026093039
+dashboard:
+  image:
+    tag: local-20261026093039
+toolbox:
+  image:
+    tag: local-20261026093039
+everything:
+  image:
+    tag: local-20261026093039
+llm:
+  provider: openai
+  model: openrouter/free
+  baseUrl: https://openrouter.ai/api/v1
+

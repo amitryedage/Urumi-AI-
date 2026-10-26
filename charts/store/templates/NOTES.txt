@@ -1,0 +1,6 @@
+Storefront:      {{ .Values.store.siteUrl }}
+WP admin:        {{ .Values.store.siteUrl }}/wp-admin  (user: {{ .Values.store.adminUser }}, password: Secret {{ .Values.existingSecret }} key wp-admin-password)
+MCP server:      http://{{ include "store.name" . }}-woo-mcp.{{ .Release.Namespace }}.svc.cluster.local:8080/mcp  (cluster-internal only)
+
+First boot runs the store-init container (WordPress + WooCommerce install), which takes ~1 minute:
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "store.wpHost" . }} -c store-init -f

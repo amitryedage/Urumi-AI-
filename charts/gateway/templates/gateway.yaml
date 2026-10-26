@@ -1,0 +1,28 @@
+{{- $secret := .Values.existingSecret }}
+{{- $env := list
+  (dict "name" "PORT" "value" "8080")
+  (dict "name" "PUBLIC_URL" "value" .Values.publicUrl)
+  (dict "name" "COOKIE_SECURE" "value" (toString .Values.gateway.cookieSecure))
+  (dict "name" "POSTGRES_PASSWORD" "valueFrom" (dict "secretKeyRef" (dict "name" $secret "key" "postgres-password")))
+  (dict "name" "DATABASE_URL" "value" (printf "postgres://%s:$(POSTGRES_PASSWORD)@%s-postgres:5432/%s" .Values.postgres.user .Release.Name .Values.postgres.database))
+  (dict "name" "ENCRYPTION_KEY" "valueFrom" (dict "secretKeyRef" (dict "name" $secret "key" "encryption-key")))
+  (dict "name" "ADMIN_EMAIL" "value" .Values.admin.email)
+  (dict "name" "ADMIN_NAME" "value" .Values.admin.name)
+  (dict "name" "ADMIN_PASSWORD" "valueFrom" (dict "secretKeyRef" (dict "name" $secret "key" "admin-password")))
+  (dict "name" "LLM_PROVIDER" "value" .Values.llm.provider)
+  (dict "name" "LLM_MODEL" "value" .Values.llm.model)
+  (dict "name" "LLM_BASE_URL" "value" .Values.llm.baseUrl)
+  (dict "name" "LLM_FALLBACKS" "value" .Values.llm.fallbacks)
+  (dict "name" "CHAT_TIMEZONE" "value" .Values.llm.timezone)
+  (dict "name" "LLM_API_KEY" "valueFrom" (dict "secretKeyRef" (dict "name" $secret "key" .Values.llm.secretKey "optional" true)))
+  (dict "name" "MCP_STATELESS" "value" (toString .Values.gateway.mcpStateless))
+  (dict "name" "UPSTREAM_TIMEOUT_MS" "value" (toString .Values.gateway.upstreamTimeoutMs))
+  (dict "name" "UPSTREAM_HEALTH_INTERVAL_MS" "value" (toString .Values.gateway.healthIntervalMs))
+  (dict "name" "UPSTREAM_PRIVATE_HOST_ALLOWLIST" "value" .Values.gateway.privateHostAllowlist)
+  (dict "name" "RATE_LIMIT_PER_MINUTE" "value" (toString .Values.gateway.rateLimitPerMinute))
+  (dict "name" "SEED_SERVERS" "value" (toJson .Values.seedServers))
+}}
+{{- range $envName, $key := .Values.seedCredentials }}
+{{- $env = append $env (dict "name" $envName "valueFrom" (dict "secretKeyRef" (dict "name" $secret "key" $key))) }}
+{{- end }}
+{{ include "gw.simpleWorkload" (dict "root" . "component" "gateway" "values" .Values.gateway "port" 8080 "replicas" .Values.gateway.replicas "healthPath" "/readyz" "env" $env) }}

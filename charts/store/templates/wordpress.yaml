@@ -1,0 +1,185 @@
+{{- $name := include "store.wpHost" . }}
+{{- $secret := .Values.existingSecret }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-content
+  labels: {{- include "store.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep   # never delete store content on helm uninstall
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.wordpress.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.wordpress.persistence.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "store.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "store.selector" (dict "root" . "component" "wordpress") | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "store.labels" . | nindent 4 }}
+    app.kubernetes.io/component: wordpress
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate        # RWO volume: never run two pods against it
+  selector:
+    matchLabels: {{- include "store.selector" (dict "root" . "component" "wordpress") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "store.labels" . | nindent 8 }}
+        app.kubernetes.io/component: wordpress
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsUser: 33       # www-data
+        runAsGroup: 33
+        fsGroup: 33
+        runAsNonRoot: true
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        # Idempotent bootstrap: install/upgrade WordPress + WooCommerce, apply config from
+        # values, and register the REST API key the MCP server uses (from the Secret).
+        - name: store-init
+          image: "{{ .Values.wordpress.image.repository }}:{{ .Values.wordpress.image.tag }}"
+          imagePullPolicy: {{ .Values.wordpress.image.pullPolicy }}
+          command: ["store-init.sh"]
+          securityContext: {{- include "store.containerSecurity" . | nindent 12 }}
+          env:
+            - name: WORDPRESS_DB_HOST
+              value: {{ include "store.dbHost" . }}:3306
+            - name: WORDPRESS_DB_NAME
+              value: {{ .Values.mariadb.database | quote }}
+            - name: WORDPRESS_DB_USER
+              value: {{ .Values.mariadb.user | quote }}
+            - name: WORDPRESS_DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: db-password } }
+            - name: WORDPRESS_CONFIG_EXTRA
+              value: |
+                define('DISABLE_WP_CRON', {{ .Values.wordpress.cron.enabled }});
+                define('AUTOMATIC_UPDATER_DISABLED', true);
+                define('DISALLOW_FILE_MODS', true);
+            - name: SITE_URL
+              value: {{ .Values.store.siteUrl | quote }}
+            - name: STORE_TITLE
+              value: {{ .Values.store.title | quote }}
+            - name: STORE_TIMEZONE
+              value: {{ .Values.store.timezone | quote }}
+            - name: STORE_CURRENCY
+              value: {{ .Values.store.currency | quote }}
+            - name: SEED_PRODUCTS
+              value: {{ .Values.store.seedProducts | quote }}
+            - name: WP_ADMIN_USER
+              value: {{ .Values.store.adminUser | quote }}
+            - name: WP_ADMIN_EMAIL
+              value: {{ .Values.store.adminEmail | quote }}
+            - name: WP_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: wp-admin-password } }
+            - name: WC_CONSUMER_KEY
+              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: wc-consumer-key } }
+            - name: WC_CONSUMER_SECRET
+              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: wc-consumer-secret } }
+          resources: {{- toYaml .Values.wordpress.initResources | nindent 12 }}
+          volumeMounts:
+            - name: content
+              mountPath: /var/www/html
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: wordpress
+          image: "{{ .Values.wordpress.image.repository }}:{{ .Values.wordpress.image.tag }}"
+          imagePullPolicy: {{ .Values.wordpress.image.pullPolicy }}
+          securityContext: {{- include "store.containerSecurity" . | nindent 12 }}
+          env:
+            - name: WORDPRESS_DB_HOST
+              value: {{ include "store.dbHost" . }}:3306
+            - name: WORDPRESS_DB_NAME
+              value: {{ .Values.mariadb.database | quote }}
+            - name: WORDPRESS_DB_USER
+              value: {{ .Values.mariadb.user | quote }}
+            - name: WORDPRESS_DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: db-password } }
+            - name: WORDPRESS_CONFIG_EXTRA
+              value: |
+                define('DISABLE_WP_CRON', {{ .Values.wordpress.cron.enabled }});
+                define('AUTOMATIC_UPDATER_DISABLED', true);
+                define('DISALLOW_FILE_MODS', true);
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:      # PHP + database round trip
+            httpGet: { path: /wp-login.php, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:       # Apache is serving
+            httpGet: { path: /readme.html, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources: {{- toYaml .Values.wordpress.resources | nindent 12 }}
+          volumeMounts:
+            - name: content
+              mountPath: /var/www/html
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: content
+          persistentVolumeClaim:
+            claimName: {{ $name }}-content
+        - name: tmp
+          emptyDir: {}
+{{- if .Values.wordpress.cron.enabled }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}-cron
+  labels: {{- include "store.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.wordpress.cron.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 120
+      template:
+        metadata:
+          labels: {{- include "store.labels" . | nindent 12 }}
+            app.kubernetes.io/component: wp-cron
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 100
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: cron
+              image: curlimages/curl:8.16.0
+              args: ["-fsS", "--max-time", "100", "http://{{ $name }}/wp-cron.php?doing_wp_cron"]
+              securityContext: {{- include "store.containerSecurity" . | nindent 16 }}
+                readOnlyRootFilesystem: true
+              resources:
+                requests: { cpu: 10m, memory: 16Mi }
+                limits: { cpu: 100m, memory: 32Mi }
+{{- end }}

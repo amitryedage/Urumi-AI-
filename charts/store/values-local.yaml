@@ -1,0 +1,8 @@
+# kind / local: *.localhost resolves to 127.0.0.1 in browsers, curl and Node, so no /etc/hosts edits.
+store:
+  siteUrl: http://store.localhost
+ingress:
+  className: traefik
+  host: store.localhost
+networkPolicy:
+  ingressControllerNamespace: traefik

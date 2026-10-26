@@ -1,0 +1,125 @@
+# Pre-created Secret with: postgres-password, encryption-key, admin-password,
+# woo-mcp-token, toolbox-api-key and (optional) llm-api-key.
+existingSecret: gateway-secrets
+
+imagePullSecrets: []
+
+# Public origin of the dashboard + MCP endpoint (MCP URL = <publicUrl>/mcp).
+publicUrl: http://app.localhost
+
+ingress:
+  enabled: true
+  className: traefik
+  host: app.localhost
+  annotations: {}
+  tls:
+    enabled: false
+    secretName: gateway-tls
+
+admin:
+  email: admin@example.com
+  name: Admin
+
+gateway:
+  image:
+    repository: urumi/gateway
+    tag: dev
+    pullPolicy: IfNotPresent
+  replicas: 1
+  # Stateless MCP mode lets several replicas serve without sticky sessions, at the cost of
+  # tools/list_changed push notifications. Turn on together with replicas > 1.
+  mcpStateless: false
+  cookieSecure: false
+  upstreamTimeoutMs: 15000
+  healthIntervalMs: 10000
+  rateLimitPerMinute: 120
+  # SSRF guard: upstream URLs that resolve to private IPs are only allowed for these suffixes.
+  privateHostAllowlist: ".svc.cluster.local,.svc"
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+llm:
+  provider: anthropic            # anthropic | openai (any OpenAI-compatible API)
+  model: claude-opus-5
+  baseUrl: ""                    # e.g. https://api.groq.com/openai/v1 for provider=openai
+  fallbacks: default             # Claude server-side refusal fallbacks: default | off
+  timezone: UTC                  # what "today" means for the chat agent
+  secretKey: llm-api-key         # key inside existingSecret (optional)
+
+# Upstream MCP servers registered on first start. After that the dashboard owns them.
+# Credentials come from env vars populated from existingSecret.
+seedServers:
+  - slug: woocommerce
+    name: WooCommerce Store
+    url: http://store-woo-mcp.store.svc.cluster.local:8080/mcp
+    authType: bearer
+    credentialEnv: WOO_MCP_TOKEN
+    timeoutMs: 20000
+  - slug: toolbox
+    name: Toolbox
+    url: http://gateway-toolbox.mcp-gateway.svc.cluster.local:8080/mcp
+    authType: header
+    authHeader: X-API-Key
+    credentialEnv: TOOLBOX_API_KEY
+  - slug: everything
+    name: Everything (MCP reference server)
+    url: http://gateway-everything.mcp-gateway.svc.cluster.local:3001/mcp
+    authType: none
+
+# Env vars (from existingSecret) available to seedServers[].credentialEnv.
+seedCredentials:
+  WOO_MCP_TOKEN: woo-mcp-token
+  TOOLBOX_API_KEY: toolbox-api-key
+
+dashboard:
+  image:
+    repository: urumi/dashboard
+    tag: dev
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+
+postgres:
+  image:
+    repository: postgres
+    tag: 17-alpine
+    pullPolicy: IfNotPresent
+  database: gateway
+  user: gateway
+  persistence:
+    size: 1Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+# Demo upstreams that run in this namespace.
+toolbox:
+  enabled: true
+  image:
+    repository: urumi/toolbox-mcp
+    tag: dev
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 20m, memory: 48Mi }
+    limits: { cpu: 300m, memory: 192Mi }
+
+everything:
+  enabled: true
+  image:
+    repository: urumi/everything-mcp
+    tag: dev
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { cpu: 300m, memory: 256Mi }
+
+networkPolicy:
+  enabled: true
+  ingressControllerNamespace: traefik
+
+podSecurityContext:
+  seccompProfile: { type: RuntimeDefault }

@@ -1,0 +1,77 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $sel := dict "root" . }}
+# Default deny: nothing in this namespace accepts traffic unless a policy below allows it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "store.name" . }}-default-deny
+  labels: {{- include "store.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+---
+# MariaDB: only WordPress may connect.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "store.name" . }}-mariadb
+  labels: {{- include "store.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "store.selector" (dict "root" . "component" "mariadb") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "store.selector" (dict "root" . "component" "wordpress") | nindent 14 }}
+      ports: [{ port: 3306 }]
+---
+# WordPress: the ingress controller (storefront), the MCP server and the cron job.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "store.name" . }}-wordpress
+  labels: {{- include "store.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "store.selector" (dict "root" . "component" "wordpress") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace }} }
+        - podSelector:
+            matchLabels: {{- include "store.selector" (dict "root" . "component" "woo-mcp") | nindent 14 }}
+        - podSelector:
+            matchLabels: {{- include "store.selector" (dict "root" . "component" "wp-cron") | nindent 14 }}
+      ports: [{ port: 8080 }]
+---
+# WooCommerce MCP server: only the gateway pods may call it (internal-only).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "store.name" . }}-woo-mcp
+  labels: {{- include "store.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "store.selector" (dict "root" . "component" "woo-mcp") | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Values.networkPolicy.gatewayNamespace }} }
+          podSelector:
+            matchLabels: { app.kubernetes.io/component: gateway }
+      ports: [{ port: 8080 }]
+  egress:
+    # It can only talk to its own store's WordPress (and DNS). No database, no internet.
+    - to:
+        - podSelector:
+            matchLabels: {{- include "store.selector" (dict "root" . "component" "wordpress") | nindent 14 }}
+      ports: [{ port: 8080 }]
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+{{- end }}

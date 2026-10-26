@@ -1,0 +1,101 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-default-deny
+  labels: {{- include "gw.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+---
+# Public entry points: dashboard and gateway, only via the ingress controller.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-public
+  labels: {{- include "gw.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/component, operator: In, values: [gateway, dashboard] }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace }} }
+      ports: [{ port: 8080 }]
+---
+# Postgres: only the gateway.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-postgres
+  labels: {{- include "gw.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "gw.selector" (dict "root" . "component" "postgres") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "gw.selector" (dict "root" . "component" "gateway") | nindent 14 }}
+      ports: [{ port: 5432 }]
+---
+# In-namespace upstream MCP servers: only the gateway may call them.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-upstreams
+  labels: {{- include "gw.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { mcp-gateway/upstream: "true" }
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "gw.selector" (dict "root" . "component" "gateway") | nindent 14 }}
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    # Internet only (e.g. the reference server's fetch tools); no cluster/private networks.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10]
+---
+# Gateway egress: its database, labelled MCP upstreams in any namespace, DNS, and the public
+# internet (LLM API, remote MCP servers). Everything else in the cluster/private ranges
+# (store databases, WordPress, cloud metadata, the Kubernetes API) is unreachable even if an
+# admin registers such a URL.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-gateway-egress
+  labels: {{- include "gw.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "gw.selector" (dict "root" . "component" "gateway") | nindent 6 }}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {{- include "gw.selector" (dict "root" . "component" "postgres") | nindent 14 }}
+      ports: [{ port: 5432 }]
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels: { mcp-gateway/upstream: "true" }
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10]
+{{- end }}

@@ -1,0 +1,3 @@
+Dashboard:     {{ .Values.publicUrl }}
+MCP endpoint:  {{ .Values.publicUrl }}/mcp   (Authorization: Bearer <personal API key>)
+Admin login:   {{ .Values.admin.email }} / password in Secret {{ .Values.existingSecret }} key admin-password

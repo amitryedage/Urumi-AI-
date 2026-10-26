@@ -1,0 +1,83 @@
+# Default values for the store chart. Environment-specific overrides live in
+# values-local.yaml (kind) and values-prod.yaml (k3s VPS).
+
+nameOverride: ""
+
+# Pre-created Secret with: db-password, db-root-password, wp-admin-password,
+# wc-consumer-key, wc-consumer-secret, mcp-token. Never put secrets in values files.
+existingSecret: store-secrets
+
+imagePullSecrets: []
+
+store:
+  siteUrl: http://store.localhost        # public URL; WordPress "home"/"siteurl"
+  title: Urumi Demo Store
+  timezone: UTC
+  currency: USD
+  adminUser: admin
+  adminEmail: admin@example.com
+  seedProducts: true
+
+ingress:
+  enabled: true
+  className: traefik
+  host: store.localhost
+  annotations: {}
+  tls:
+    enabled: false
+    secretName: store-tls
+
+wordpress:
+  image:
+    repository: urumi/wordpress
+    tag: dev
+    pullPolicy: IfNotPresent
+  persistence:
+    size: 2Gi
+    storageClass: ""          # "" = cluster default (kind: standard, k3s: local-path)
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 768Mi }
+  initResources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  # WP-Cron runs from a CronJob instead of piggybacking on page views.
+  cron:
+    enabled: true
+    schedule: "*/5 * * * *"
+
+mariadb:
+  image:
+    repository: mariadb
+    tag: "11.8"
+    pullPolicy: IfNotPresent
+  database: wordpress
+  user: wordpress
+  persistence:
+    size: 2Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 768Mi }
+
+mcp:
+  enabled: true
+  image:
+    repository: urumi/woo-mcp
+    tag: dev
+    pullPolicy: IfNotPresent
+  replicas: 1
+  timeoutMs: 10000
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+networkPolicy:
+  enabled: true
+  # Namespace of the ingress controller allowed to reach WordPress.
+  ingressControllerNamespace: traefik
+  # Namespace of the gateway: the only thing allowed to call the MCP server.
+  gatewayNamespace: mcp-gateway
+
+podSecurityContext:
+  seccompProfile: { type: RuntimeDefault }

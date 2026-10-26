@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.secrets/
+*.log
+.DS_Store
+powershell.cmd
+assignment/
+__MACOSX/
+*.docx
+Urumi AI FDE Internship - Round 1_ MCP Gateway on Kubernetes.docx
+.claude/

@@ -1,0 +1,35 @@
+# k3s VPS. Override the domain with --set or a private values file:
+#   helm upgrade --install store charts/store -n store -f charts/store/values-prod.yaml \
+#     --set store.siteUrl=https://store.example.com --set ingress.host=store.example.com
+store:
+  siteUrl: https://store.example.com
+  seedProducts: false
+ingress:
+  className: traefik                  # k3s ships Traefik
+  host: store.example.com
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+  tls:
+    enabled: true
+    secretName: store-tls
+wordpress:
+  image:
+    repository: ghcr.io/CHANGE-ME/urumi-wordpress
+    tag: "0.1.0"
+  persistence:
+    storageClass: local-path          # k3s default provisioner; use a replicated class (e.g. longhorn) for HA
+    size: 10Gi
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "2", memory: 1Gi }
+mariadb:
+  persistence:
+    storageClass: local-path
+    size: 10Gi
+mcp:
+  image:
+    repository: ghcr.io/CHANGE-ME/urumi-woo-mcp
+    tag: "0.1.0"
+networkPolicy:
+  ingressControllerNamespace: kube-system   # k3s runs Traefik in kube-system
